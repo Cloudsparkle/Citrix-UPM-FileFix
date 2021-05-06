@@ -1,79 +1,65 @@
-﻿Add-PSSnapin Citrix*
-$CTXDDC = "nitcitddc1vp"
+#requires -modules ActiveDirectory
+<#
+.SYNOPSIS
+  Copy SAP Settings from one userprofile to another
+.DESCRIPTION
+  This script lets you select a source and destination user. It will then copy SAP NWBC settings files from the source userprofile to the destination and fix permissions
+.INPUTS
+  Source AD user, Destination AD user
+.OUTPUTS
+  None
+.NOTES
+  Version:        1.0
+  Author:         Bart Jacobs - @Cloudsparkle
+  Creation Date:  06/05/2021
+  Purpose/Change: Copy SAP NWBC Settings from one user to anoth
+.EXAMPLE
+  None
+#>
 
-while ($true)
+$ProfileShare = "" #just make sure it ends with a \
+$ADusers = get-aduser -filter *  | select name, samaccountname, SID | sort name
+
+$SourceUser= $ADusers | Out-GridView -Title "Select source user" -OutputMode Single
+if ($SourceUser -eq $null)
 {
-#Write-host "Cleaning up first..."
-#[System.GC]::Collect()
-#Sleep 15
-
-$NWBCUsers = Get-ADGroupMember -Identity FUJ_NE_CTX_MIGRATE-SAP-SETTINGS
-foreach ($NWBCUser in $NWBCUsers)
-{
-Write-Host "Processing " $NWBCUser.name -ForegroundColor Yellow
-
-$Currentsession = ""
-$Currentsession = Get-BrokerSession -AdminAddress $ctxddc -UserSID $NWBCUser.SID
-
-if ($Currentsession -ne $null)
-    {
-    write-host "User" $NWBCUser.name "has a current session. Moving on." -ForegroundColor Red
-    continue
-    }
-
-#$ADUser = Get-ADUser $NWBCUser | select samaccountname
-
-$Legacypath = "\\nittoeurope.com\NE\Profiles\" + $NWBCUser.samaccountname + "\UPM_Profile\AppData\Roaming\SAP\NWBC\*.xml"
-$FJPath = "\\nitctxfil1vp.nittoeurope.com\profiles$\"+ $NWBCUser.samaccountname + ".nittoeurope\UPM_Profile\AppData\Roaming\SAP\NWBC"
-$FJXMLPath = "\\nitctxfil1vp.nittoeurope.com\profiles$\"+ $NWBCUser.samaccountname + ".nittoeurope\UPM_Profile\AppData\Roaming\SAP\NWBC\SAPBCFavorites.xml"
-$FJXMLPath2 = "\\nitctxfil1vp.nittoeurope.com\profiles$\"+ $NWBCUser.samaccountname + ".nittoeurope\UPM_Profile\AppData\Roaming\SAP\NWBC\NWBCFavorites.xml"
-
-$LegacyExists =Test-Path -Path $Legacypath
-$FJExists =Test-Path -Path $FJPath
-
-#Write-Host $Legacypath, $LegacyExists, $FJExists
-
-if ($LegacyExists -eq $true)
-    {
-    Write-host "Legacy settings exist..."
-
-    if ($FJExists -eq $true)
-        {
-        Write-host "User has accessed the FJ application already."
-        Write-Host "Copying files..."
-        Copy-Item $Legacypath -Destination $FJPath
-        Write-Host "Fixing permissions..."
-        icacls $FJXMLPath /setowner $NWBCUser.samaccountname
-        icacls $FJXMLPath /inheritancelevel:e
-        $XML2exists = Test-Path -Path $FJXMLPath2
-        if ($XML2exists -eq $true)
-            {
-            icacls $FJXMLPath2 /setowner $NWBCUser.samaccountname
-            icacls $FJXMLPath2 /inheritancelevel:e
-            }
-        
-        Write-Host "Removing user from AD Group" -ForegroundColor Green
-        Remove-ADGroupMember -Identity FUJ_NE_CTX_MIGRATE-SAP-SETTINGS -Members $NWBCUser.samaccountname -Confirm:$False
-        }
-    Else
-        {
-        write-host "User has not launched the FJ application yet. Moving on." -ForegroundColor red
-        }
-    }
-Else
-    {
-    write-host "User has not launched the Legacy application. Nothing to migrate." -ForegroundColor red
-    Write-Host "Removing user from AD Group" -ForegroundColor Green
-    Remove-ADGroupMember -Identity FUJ_NE_CTX_MIGRATE-SAP-SETTINGS -Members $NWBCUser.samaccountname -Confirm:$False
-    }
+  exit 0
 }
 
-Write-Host "Waiting for next run..."
-clear-variable -name NWBCUsers
-#[System.GC]::GetTotalMemory($true) | out-null
-"Memory used before collection: $([System.GC]::GetTotalMemory($false))"
-[System.GC]::Collect()
-Sleep 15
-"Memory used after full collection: $([System.GC]::GetTotalMemory($true))"
-Sleep 15
+$DestinationUser = $ADusers | Out-GridView -Title "Select destination user" -OutputMode Single
+if ($DestinationUser -eq $null)
+{
+  exit 0
+}
+
+$Sourcepath = $ProfileShare + $SourceUser.samaccountname + "\UPM_Profile\AppData\Roaming\SAP\NWBC\*.xml"
+$Destinationpath = $ProfileShare + $DestinationUser.samaccountname + "\UPM_Profile\AppData\Roaming\SAP\NWBC"
+$DestinationXMLpath = $ProfileShare + $DestinationUser.samaccountname + "\UPM_Profile\AppData\Roaming\SAP\NWBC\*.xml"
+$DestinationXMLFile1 = $ProfileShare + $DestinationUser.samaccountname + "\UPM_Profile\AppData\Roaming\SAP\NWBC\SAPBCFavorites.xml"
+$DestinationXMLFile2 = $ProfileShare + $DestinationUser.samaccountname + "\UPM_Profile\AppData\Roaming\SAP\NWBC\NWBCFavorites.xml"
+
+$SourcePathExists = Test-Path -Path $Sourcepath
+
+if ($SourcePathExists -eq $false)
+{
+  Write-host "Source files not present. Nothing to copy"
+  exit 0
+}
+
+$DestinationPathExists = test-path $Destinationpath
+if ($DestinationPathExists)
+{
+  Copy-Item $Sourcepath -Destination $DestinationPath
+  icacls $DestinationXMLFile1 /setowner $DestinationUser.samaccountname
+  icacls $DestinationXMLFile1 /inheritancelevel:e
+  $XML2exists = Test-Path -Path $DestinationXMLFile2
+  if ($XML2exists -eq $true)
+  {
+    icacls $DestinationXMLFile2 /setowner $DestinationUser.samaccountname
+    icacls $DestinationXMLFile2 /inheritancelevel:e
+  }
+}
+Else
+{
+  Write-Host "New user has not started SAP yet"
 }
